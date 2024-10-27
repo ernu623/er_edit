@@ -4,50 +4,16 @@ VERSION = '1.1v'
 COPYRIGHT = 'GNU GENERAL PUBLIC LICENSE or GNU'
 
 
-import sys # импорт для достпуа внешная аргмента как python er.py -p a
-import codecs # импорт для нормалная кодеровка текста в файле
+import sys
+import codecs
 import os
-from os import system # импорт для system и os.name для очиски экрана
+from os import system
 import io
 import signal
+import importlib
+import re
+from colorama import Fore, Style, init
 
-
-#тутор нахуй 
-help_tutor = '''
-p   [argv]  Mode wrtie
-    a [argv]                    Will complement the text
-    w [argv] default            If not, creates a new file, if there is a file, it is recreated
-    *r*                         Reload text
-    *!* [COMMAND]               Command is shell
-    *u*                         Delete lines of text
-    *q* [FILE] [ENCODING]       Save in file [FILE] and exit
-    *w* [FILE] [ENCODING]       If not file, creates a now, or not quit
-
-        1-6 [ENCODING]      Encodind write for file
-              1         2        3          4                 5            6
-            UTF-8    UTF-16   UTF-32    Windows-1251     ISO-8859-1      ASCII
-           default
-    *a* [ARGV] [FILE]           Autosave, default encoding UTF-8, default file autosave 'file_autosave.tmp'
-        on                         on autosave
-        off                        off autosave
-
-r   [FILE] [ENCODING]           Mode read
-    It reads [FILE] and shows the screen
-
-        1-7, b [ENCODING]      Encodind read for file
-              1         2        3          4                 5            6          b
-            UTF-8    UTF-16   UTF-32    Windows-1251     ISO-8859-1      ASCII      BINARY
-           default
-
-h   Help program
-
-v   Version program
-
-q   The exit
-'''
-
-
-# еще один тутор нахуй, но для внешная аргумента, кстати у меня хорошо с англики, но все это переводчик сделол
 help_argv = '''
 This is a simple file editor
 
@@ -68,36 +34,116 @@ er [ARGV] [FILE]
         b [ARGV]            read file mode binar
 '''
 
-class write_code: # класс для запиас
+
+help_tutor = '''
+Commands available in the text editor:
+
+### Write Mode (p)
+- p [ARGV]                    : Enter write mode
+  - a [ARGV]                  : Append text to the current file
+  - w [ARGV] (default)        : Save current text to [argv]. If the file exists, it will be overwritten; if not, a new file is created
+    ### Command
+    - .                                   : To write commands as text
+    - *r*                                 : Reload the current text
+    - *!* [COMMAND]                       : Execute a shell command
+    - *s* [OLD TEXT] [NEW TEXT]           : Fade [OLD TEXT] to [NEW TEXT]
+    - *u* [ARGV]                          : Delete the last line of text, [ARGV] must be a number, this is how many lines to delete
+    - *q* [FILE] [ENCODING] [MODE]        : Save the text to [FILE] and exit
+    - *w* [FILE] [ENCODING] [MODE]        : Save the current text to [FILE]
+        - [FILE] if there is a '!' instead of the file, then it is not saved
+
+        - [ENCODING] Encoding options:
+          1: UTF-8
+          2: UTF-16
+          3: UTF-32
+          4: Windows-1251
+          5: ISO-8859-1
+          6: ASCII
+        - Default: UTF-8 if no encoding is specified
+
+        -[MODE] Write mode:
+            1: a       : append
+            2: w       : write  (Default)
+
+    ### Autosave
+    - *a* [ARGV] [FILE]*         : Enable or disable autosaving. Default encoding is UTF-8, and default file for autosave is 'file_autosave.tmp'
+        - [ARGV] on                : Enable autosave
+        - [ARGV] off               : Disable autosave
+
+    ### Plugin Management
+        - *pgl* [FILE PYTHON]       : Load a Python file as a plugin, If your plugin to be loaded is in a different directory, for example plugin/plugin.py, then plugin.plugin
+        - *pg* [FILE PYTHON]        : Run the main function of the loaded plugin, If your plugin is located in a different directory, for example plugin/plugin.py, then plugin.plugin
+        - *pgd* [FILE PYTHON]       : Unload the specified plugin
+        - *pgp*                     : Print all loaded plugins
+
+    ### Command History
+        - *pc*                       : Print the history of shell commands executed
+
+    ### Syntax
+        - *syntax* [ARGV] [FILE]
+            - on  [FILE]             : ON syntax, glory who acts backlight
+            - off                    : OFF syntax
+
+    ### File load
+        - *fl* [FILE]                : Flie load
+
+### Read Mode (r)
+- r [FILE] [ENCODING]     : Read [FILE] and display its contents on the screen
+    - [ENCODING] Encoding options:
+        - 1: UTF-8
+        - 2: UTF-16
+        - 3: UTF-32
+        - 4: Windows-1251
+        - 5: ISO-8859-1
+        - 6: ASCII
+        - 7: BINARY
+    - Default: UTF-8 if no encoding is specified
+
+### Miscellaneous
+- h                       : Display this help information
+- v                       : Show the version of the program
+- q                       : Exit the editor
+- ![COMMAND]              : Command shell
+'''
+
+
+
+class write_code:
     def __init__(self):
-        # обычая инид
-        self.index_coding = 0 # перемена для какой имына кодеровка выберет
-        self.all_coding = ['utf-8', 'utf-16', 'utf-32', 'cp1251','iso-8859-1', 'ascii'] # список кодеровка
-        self.s = 1 # строка
-        self.text = '' # сам текст
-        self.text_undo = '' # текст но одну строк менше 
-        self.text_tmp = '' # хуй его знает для это нахуй
+        self.index_coding = 0
+        self.all_coding = ['utf-8', 'utf-16', 'utf-32', 'cp1251','iso-8859-1', 'ascii']
+        self.s = 1
+        self.text = ''
+        self.text_undo = ''
+        self.text_tmp = ''
         self.clear = 'cls' if os.name == 'nt' else 'clear'
         self.file_autosave = 'file_autosave.tmp'
         self.autosave = True
-
-    # мне подло еще миллард строк комент писать
+        self.history_command = []
+        self.plg = []
+        self.module_stek = []
+        self.syntax_name = []
+        self.syntax = False
+        self.auto_load_syntax_file =  os.getenv("HOME") + '/' + '.syntax'
 
     def write_autosave(self, *argv):
+
         value = self.text_tmp.split()
 
-        try:
-            if value[1]:
+        if not value:
+            return
 
-                if value[1] == 'on':
-                    self.autosave = True
-                elif value[1] == 'off':
-                    self.autosave = False
-                else:
-                    print('?')
-
-        except IndexError:
-            pass
+        write_file_on = False
+        if len(value) >= 2:
+            if value[0] == '*a*':
+                if value[1]:
+                    if value[1] == 'on':
+                        self.autosave = True
+                        write_file_on = True
+                    elif value[1] == 'off':
+                        self.autosave = False
+                    else:
+                        print('?')
 
         if self.autosave:
             try:
@@ -105,134 +151,310 @@ class write_code: # класс для запиас
             except IndexError:
                 pass
 
-            with open(self.file_autosave, 'w', encoding=self.all_coding[0]) as file:
-                file.write(str(self.text))
+            if write_file_on:
+                with open(self.file_autosave, 'w', encoding=self.all_coding[0]) as file:
+                    file.write(str(self.text))
         else:
             if os.path.exists(self.file_autosave):
                 os.remove(self.file_autosave)
+
+    def write_search_and_replace(self):
+
+        old_text = self.text_tmp.split()[1]
+        new_text = self.text_tmp.split()[2]
+
+        if old_text in self.text:
+            self.text = self.text.replace(old_text, new_text)
+            print(f'Replaced "{old_text}" with "{new_text}"')
+        else:
+            print(f'Text "{old_text}" not found')
+
+
+    def write_plugin_print(self):
+        system(self.clear)
+        print('Loaded plugin:')
+        for pl in self.plg:
+            print(f'\t{pl}')
+        continue_code()
+
+    def write_plugin_load(self):
+        val = self.text_tmp.split()[1]
+
+        for tmp in self.plg:
+            if val == tmp:
+                print('?: This module is loaded')
+                continue_code()
+                self.write_reload()
+                return
+
+        if val[0] == '.':
+            val = val[1:]
+
+        try:
+            self.module_stek.append(importlib.import_module(val))
+            self.plg.append(val)
+            print('OK')
+        except ModuleNotFoundError:
+            print('?: Plugin not Found')
+
+        continue_code()
+        system(self.clear)
+        self.write_reload()
+
+    def write_plugin(self):
+        val = self.text_tmp.split()[1]
+        s = 0
+
+        system(self.clear)
+
+        for pg in self.plg:
+            if val == pg:
+                try:
+                    self.module_stek[s].main()
+                except Exception as e:
+                    print(f'Error: {e}')
+            else:
+                s += 1
+        else:
+            continue_code()
+
+
+    def write_plugin_del(self):
+        value = self.text_tmp.split()
+        i = 0
+        flag = False
+
+        if value[1]:
+            for pg in self.plg:
+                if value[1] == pg:
+                    del self.plg[i]
+                    flag = True
+                else:
+                    i+=1
+            else:
+                if flag:
+                    print('Del plugin')
+                else:
+                    print('?: Not plugin')
+        else:
+            print('?')
+
+
+    def write_syntax(self, p=False):
+        text1 = ''
+
+        for s in self.text.splitlines():
+            line_with_syntax = ''
+            temp_word = ''
+
+            for char in s:
+                if char == '\t':
+                    line_with_syntax += '\t'
+                    continue
+
+                if char.isspace():
+                    if temp_word:
+                        if temp_word in self.syntax_name:
+                            line_with_syntax += (Fore.RED + temp_word + Style.RESET_ALL)
+                        else:
+                            line_with_syntax += temp_word
+                        temp_word = ''
+                    line_with_syntax += char
+                else:
+                    temp_word += char
+
+
+            if temp_word:
+                if temp_word in self.syntax_name:
+                    line_with_syntax += (Fore.RED + temp_word + Style.RESET_ALL)
+                else:
+                    line_with_syntax += temp_word
+
+            text1 += line_with_syntax + '\n'
+
+
+        if p:
+            text = io.StringIO(text1)
+            self.s = 0
+            for _, line in enumerate(text.readlines()):
+                self.s += 1
+                print(f'{self.s}: {line}', end='')
+            self.s += 1
+
+
+
+    def write_syntax_on(self):
+        if len(self.text_tmp.split()) > 3:
+            print('?')
+            return
+
+        if self.text_tmp.split()[1] == 'on':
+            if len(self.text_tmp.split()) >= 3:
+                if os.path.exists(self.text_tmp.split()[2]):
+                    with open(self.text_tmp.split()[2], 'r') as f:
+                        self.syntax_name = f.read().split()
+                        self.syntax = True
+        elif self.text_tmp.split()[1] == 'off':
+            print('sd')
+            self.syntax = False
+        else:
+            print('?')
+
+
+    def write_auto_load_syntax(self):
+        if os.path.exists(self.auto_load_syntax_file):
+            with open(self.auto_load_syntax_file, 'r', encoding='UTF-8') as f:
+                self.syntax_name = f.read().split()
+                self.syntax = True
+
+
 
     def write_reload(self):
         system(self.clear)
         text = io.StringIO(self.text)
 
-        o= 1
+        if self.syntax:
+            self.write_syntax(p=True)
+            return
+
+        self.s = 0
         for _, line in enumerate(text.readlines()):
-            print(f'{o}: {line}', end='')
-            o += 1
+            self.s += 1
+            print(f'{self.s}: {line}', end='')
+        self.s += 1
+
+    def write_print_command(self):
+        os.system(self.clear)
+        for i in self.history_command:
+            print(*i)
+
+        continue_code()
+        self.write_reload()
 
 
     def write_command(self):
-        import subprocess
         command = self.text_tmp.split()[1:]
 
+        self.history_command.append(' '.join(command))
+        system(self.clear)
         try:
-            result = subprocess.run(command, capture_output=True, shell=True)
+            system(' '.join(command))
         except KeyboardInterrupt:
             self.write_reload()
             return
 
-        subprocess.run([self.clear])
-
-        print(result.stdout.decode())
-        print(result.stderr.decode())
-        print(result.returncode)
-
-        input('Press <ENTER> to continue')
-        subprocess.run([self.clear])
+        continue_code()
 
         self.write_reload()
-        del subprocess
 
     def write_encoding(self):
         try:
 
-            if len(self.all_coding) >= int(self.text_tmp.split()[2]) or int(self.text_tmp.split()[2]) >= -1:
-                self.index_coding = int(self.text_tmp.split()[2])
-                print('s')
-            else:
+            if len(self.text_tmp.split()) < 2:
+                self.all_coding = 0
+
+            if not self.text_tmp.split()[2].isdigit():
                 return 1
 
-        except ValueError:
-            return 1
-        except IndexError:
-            return
+            if len(self.all_coding) >= int(self.text_tmp.split()[2])-1 or int(self.text_tmp.split()[2]) >= -1:
+                self.index_coding = int(self.text_tmp.split()[2]) - 1
+            else:
+                self.index_coding = 0
         except:
-            return 1
+            self.index_coding = 0
 
-    def write_update(self):
-        with codecs.open(self.text_tmp.split()[1], 'w', encoding=self.all_coding[self.index_coding], errors='replace') as f:
+    def write_reload_text_file(self):
+        if len(self.text_tmp.split()) == 2:
+            if os.path.exists(self.text_tmp.split()[1]):
+                with open(self.text_tmp.split()[1], 'r', encoding=self.all_coding[self.index_coding], errors='replace') as f:
+                    self.text = f.read()
+            else:
+                print('?: Not File')
+        else:
+            print('?: Not argument')
+        continue_code()
+
+    def write_update(self, mode='w'):
+        if len(self.text_tmp.split()) < 2:
+            self.all_coding = 0
+
+        with codecs.open(self.text_tmp.split()[1], mode, encoding=self.all_coding[self.index_coding], errors='replace') as f:
             f.seek(0)
             f.write(self.text)
-
+            f.seek(0)
+        with codecs.open(self.text_tmp.split()[1], 'r', encoding=self.all_coding[self.index_coding], errors='replace') as f:
+            self.text = f.read()
         system(self.clear)
         self.write_reload()
 
 
-    def write_quit(self, mode): # ну конечно я говнокодер, не буду это перепишит
+
+    def write_quit(self, mode='w'):
         returncode = '1'
         signal.alarm(0)
 
         try:
 
-            if self.text_tmp.split()[1] == '!':
+            if self.text_tmp.split()[1] == '!' or not self.text_tmp.split()[1].strip():
                 return ('file: close | code: ' + str(returncode))
 
             with codecs.open(self.text_tmp.split()[1], mode, encoding=self.all_coding[self.index_coding], errors='replace') as file:
-                file.write(str(self.text).encode(self.all_coding[self.index_coding]))
+                file.write(str(self.text))
                 returncode = '0'
                 print('Done!')
                 self.text = ''
                 return ('file: ' + (self.text_tmp.split()[1]) + ' | code: ' + returncode)
+
         except IndexError:
 
-            if not self.text_tmp:
-                self.text += '\n'
-                self.s += 1
-                return
-            else:
-                print('?')
-                return
+            if self.text_tmp:
+                return ('file: close | code: ' + str(returncode))
 
         except PermissionError:
-            print('Access denied')
+            print('?:Access denied')
         except OSError:
-            print('Access denied is os')
+            print('?:Access denied is os')
 
-    def write_undo(self): # это тоже не буду перепишит
-        system(self.clear)
+    def write_undo(self):
+
+        if len(self.text_tmp.split()) == 2:
+            if self.text_tmp.split()[1].isdigit():
+                s_undo = int(self.text_tmp.split()[1])
+            else:
+                return
+        else:
+            s_undo = 1
+
+        s_undo_m = '-' + str(s_undo)
+        s_undo_m = int(s_undo_m)
+
         if self.s > 1:
-            self.s -= 1
-
-            all_lines = self.text.strip().split('\n')
-            self.text_undo = '\n'.join(all_lines[:self.s])
-            self.text = str(self.text_undo)
-
-            for idx, line in enumerate(all_lines[:self.s], 1):
-                if line:
-                    print(f'{idx}: {line}')
-                else:
-                    print(f'{idx}: ')
-
-
+            self.s -= s_undo
+            text = io.StringIO(self.text)
+            text_tmp = text.readlines()
+            text_tmp = text_tmp[:s_undo_m]
+            self.text = ''.join(text_tmp)
+            self.write_reload()
 
     def write_mode(self, mode = 'w'):
         system(self.clear)
         self.text = ''
         returncode = '1'
 
+        self.write_auto_load_syntax()
         while True:
             try:
 
                 signal.signal(signal.SIGALRM, self.write_autosave)
                 signal.alarm(15)
                 self.text_tmp = str(input(f'{self.s}: '))
-                signal.alarm(0)
-
             except KeyboardInterrupt:
                 self.write_autosave()
-                print('\n')
-                return
+                return ('\nfile: close | code: ' + str(returncode))
+
             try:
+
+
                 if self.text_tmp.split()[0] == '*q*':
                     res = self.write_encoding()
 
@@ -256,6 +478,26 @@ class write_code: # класс для запиас
                     self.write_reload()
                 elif self.text_tmp.split()[0] == '*a*':
                     self.write_autosave()
+                elif self.text_tmp.split()[0] == '*s*':
+                    self.write_search_and_replace()
+                elif self.text_tmp.split()[0] == '*pc*':
+                    self.write_print_command()
+                elif self.text_tmp.split()[0] == '*pgl*':
+                    self.write_plugin_load()
+                elif self.text_tmp.split()[0] == '*pg*':
+                    self.write_plugin()
+                elif self.text_tmp.split()[0] == '*pgp*':
+                    self.write_plugin_print()
+                elif self.text_tmp.split()[0] == '*pgd*':
+                    self.write_plugin_del()
+                elif self.text_tmp.split()[0] == '*syntax*':
+                    self.write_syntax_on()
+                elif self.text_tmp.split()[0] == '*fl*':
+                    self.write_reload_text_file()
+                elif self.text_tmp[0] == '.':
+                    self.text_tmp = self.text_tmp[1:]
+                    self.text += (self.text_tmp + '\n')
+                    self.s += 1
                 else:
                     self.text += (self.text_tmp + '\n')
                     self.s += 1
@@ -269,12 +511,16 @@ class write_code: # класс для запиас
 
             except IsADirectoryError:
                 print('Unavailable titles')
-            #except:
-                #print('Error')
-                #exit()
-            finally:
-                self.index_coding = 0
+            except:
+                print('Error')
+                exit()
 
+            self.index_coding = 0
+            self.write_reload()
+
+
+    def __del__(self):
+        print('Bye')
 
 class read_mode:
     def __init__(self, file_name: str, b=False, index=1, code=0):
@@ -313,6 +559,7 @@ class read_mode:
         self.name_os = 'cls' if os.name == 'nt' else 'clear'
 
     def read_file(self):
+
         len_coding = len(self.all_coding)
 
         if self.index_coding > len_coding:
@@ -338,6 +585,8 @@ class read_mode:
         except keyboardinterrupt:
             print('exit\n')
 
+    def __del__(self):
+        print('Bye')
 
 def mode(value: str):
     global version
@@ -366,8 +615,16 @@ def mode(value: str):
                 read_mode(value.split()[1]).read_file()
 
         except IndexError:
-            print('?')
+            print('?: Not argument')
             return
+
+    elif value[0] == '!':
+
+        if len(value.split()) >= 0:
+            system(value[1:])
+        else:
+            print(value.split())
+            print('?: Not argument')
 
     elif value.split()[0] == 'q':
         exit()
@@ -376,7 +633,7 @@ def mode(value: str):
     elif value.split()[0] == 'h':
         print(help_tutor)
     elif value.split()[0] == 'c':
-        system('cls' if name == 'nt' else 'clear')
+        system('cls' if os.name == 'nt' else 'clear')
     else:
         print('?')
 
@@ -397,8 +654,15 @@ def main():
         mode(text)
 
 
+def continue_code():
+    try:
+        print('\n\nPress <ENTER> to continue\n\n')
+        sys.stdin.readline()
+    except KeyboardInterrupt:
+        pass
+
 if __name__ == '__main__':
-    try: # мне падло переписать это
+    try:
         if 4 < len(sys.argv):
             print(help_argv)
             exit()
